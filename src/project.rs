@@ -140,7 +140,7 @@ impl Task {
     }
 
     pub fn header() -> String {
-        let desc_width = termion::terminal_size().unwrap().0 as usize - 36;
+        let desc_width = termion::terminal_size().unwrap().0 as usize - 37;
         format!(
             "{div_left}{state}{div}{desc}{div}{date}",
             state = FormattedString::from("State").center(7),
@@ -170,7 +170,7 @@ impl Listable for &str {
 
 impl Listable for Task {
     fn view(&self) -> String {
-        let desc_width = termion::terminal_size().unwrap().0 as usize - 36;
+        let desc_width = termion::terminal_size().unwrap().0 as usize - 37;
         format!(
             "{div_left}{state}{div}{desc}{div}{date}",
             state = self.state(),

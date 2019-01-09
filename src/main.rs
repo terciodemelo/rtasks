@@ -86,14 +86,23 @@ fn write_line(
     output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
     content: &Listable,
 ) -> Result<()> {
+    let line_number = if index >= HEADER_OFFSET {
+        (index - HEADER_OFFSET + 1).to_string()
+    } else {
+        " ".to_string()
+    };
+
     let (cursor, formatted_content) = if index == current_line - 1 {
         (
-            FormattedString::from("> ").fg(YELLOW),
+            FormattedString::from(&line_number)
+                .right(3)
+                .fg(YELLOW)
+                .focused(),
             FormattedString::from(&content.view()).focused(),
         )
     } else {
         (
-            FormattedString::from("  "),
+            FormattedString::from(&line_number).right(3),
             FormattedString::from(&content.view()),
         )
     };
