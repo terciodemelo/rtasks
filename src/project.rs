@@ -84,7 +84,7 @@ impl Project {
         format!(
             "{div_left}{tasks}{div}{desc}",
             tasks = "Tasks",
-            desc = FormattedString::from("Description").left(80),
+            desc = FormattedString::from("Description").left(79),
             div_left = div().left(2),
             div = div().center(3)
         )
@@ -184,7 +184,7 @@ impl Listable for Task {
 
 impl Listable for Project {
     fn view(&self) -> String {
-        let desc_width = termion::terminal_size().unwrap().0 as usize - 12;
+        let desc_width = termion::terminal_size().unwrap().0 as usize - 13;
         format!(
             "{div_left}{tasks}{div}{desc}",
             tasks = FormattedString::from(&self.tasks.len().to_string()).center(5),

@@ -203,6 +203,8 @@ fn handle_user_input(
             Key::Char('q') => break,
             Key::Char('j') | Key::Down => context = next_line(context),
             Key::Char('k') | Key::Up => context = previous_line(context),
+            Key::Char('g') => context = first_line(context),
+            Key::Char('G') => context = last_line(context),
             Key::Char(c @ 'J') | Key::Char(c @ 'K') => {
                 context = swap_rows(context, project_context, c, projects)?;
             }
@@ -315,6 +317,20 @@ fn previous_line(context: Context) -> Context {
     match context {
         Context::Project(line, len) => Context::Project(max(HEADER_OFFSET + 1, line - 1), len),
         Context::Task(line, len) => Context::Task(max(HEADER_OFFSET + 1, line - 1), len),
+    }
+}
+
+fn first_line(context: Context) -> Context {
+    match context {
+        Context::Project(_, len) => Context::Project(HEADER_OFFSET + 1, len),
+        Context::Task(_, len) => Context::Task(HEADER_OFFSET + 1, len),
+    }
+}
+
+fn last_line(context: Context) -> Context {
+    match context {
+        Context::Project(_, len) => Context::Project(HEADER_OFFSET + len, len),
+        Context::Task(_, len) => Context::Task(HEADER_OFFSET + len, len),
     }
 }
 
