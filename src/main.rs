@@ -118,6 +118,21 @@ fn write_input_char(
     output.flush()
 }
 
+fn backspace(
+    line: u16,
+    column: u16,
+    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
+) -> Result<()> {
+    write!(
+        output,
+        "{}{}{}",
+        termion::cursor::Goto(column, line),
+        ' ',
+        termion::cursor::Goto(column, line)
+    )?;
+    output.flush()
+}
+
 fn write_input_prompt(
     line: u16,
     output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
@@ -222,7 +237,7 @@ fn get_input_line(
             }
             Key::Backspace => {
                 if let Some(_) = description.pop() {
-                    write_input_char(line, 4 + description.chars().count() as u16, output, ' ')?
+                    backspace(line, 4 + description.chars().count() as u16, output)?
                 }
             }
             Key::Char(c) => {
