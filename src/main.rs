@@ -187,11 +187,11 @@ fn handle_user_input(
                 }
             }
             Context::Task(current_line, _) => {
-                let project_idx = project_context.idx();
+                projects[project_context.idx()].sort_tasks();
 
                 write_line(0, 3, &mut output, &Task::header())?;
                 write_line(1, 4, &mut output, &pane_div(terminal_width))?;
-                for (i, task) in projects[project_idx].tasks.iter().enumerate() {
+                for (i, task) in projects[project_context.idx()].tasks.iter().enumerate() {
                     write_line(i as u16 + HEADER_OFFSET, current_line, &mut output, task)?
                 }
             }
@@ -211,7 +211,7 @@ fn handle_user_input(
             Key::Char('\n') => enter_context(&mut context, &mut project_context, &projects),
             Key::Esc => leave_context(&mut context, &mut project_context),
             Key::Char(change @ '>') | Key::Char(change @ '<') => {
-                change_status(context, project_context, projects, change)?;
+                context = change_status(context, project_context, projects, change)?;
             }
             Key::Char('-') => context = delete_current_line(context, project_context, projects)?,
             Key::Char('+') => {
@@ -413,9 +413,10 @@ fn change_status(
     project_context: Context,
     projects: &mut Vec<Project>,
     change: char,
-) -> Result<()> {
-    if let Context::Task(_, _) = context {
+) -> Result<Context> {
+    if let Context::Task(_, len) = context {
         let task = &mut projects[project_context.idx()].tasks[context.idx()];
+        let task_id = task.id.clone();
         let current_state = task.state();
         let next_state = match change {
             '>' => match current_state {
@@ -428,7 +429,7 @@ fn change_status(
                 State::ONGOING => State::TODO,
                 s @ _ => s,
             },
-            _ => State::TODO, // Change
+            _ => State::TODO, // Rust doesn't understand that we already have exhaustive check
         };
 
         if next_state != current_state {
@@ -436,12 +437,18 @@ fn change_status(
                 data: next_state,
                 date_time: Utc::now(),
             });
+            projects[project_context.idx()].sort_tasks();
+            save_database(projects)?;
 
-            save_database(projects)
+            if let Some(index) = projects[project_context.idx()].find_task_index(task_id) {
+                Ok(Context::Task(index as u16 + HEADER_OFFSET + 1, len))
+            } else {
+                Ok(context)
+            }
         } else {
-            Ok(())
+            Ok(context)
         }
     } else {
-        Ok(())
+        Ok(context)
     }
 }
