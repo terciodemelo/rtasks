@@ -8,7 +8,6 @@ extern crate serde_json;
 
 mod formatted_string;
 mod project;
-mod table;
 
 use crate::formatted_string::FormattedString;
 use crate::project::Listable;
