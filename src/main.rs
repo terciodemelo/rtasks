@@ -194,6 +194,9 @@ fn handle_user_input(
             Key::Char('q') => break,
             Key::Char('j') | Key::Down => context = next_line(context),
             Key::Char('k') | Key::Up => context = previous_line(context),
+            Key::Char(c @ 'J') | Key::Char(c @ 'K') => {
+                context = swap_rows(context, project_context, c, projects)?;
+            }
             Key::Char('\n') => enter_context(&mut context, &mut project_context, &projects),
             Key::Esc => leave_context(&mut context, &mut project_context),
             Key::Char(change @ '>') | Key::Char(change @ '<') => {
@@ -216,6 +219,37 @@ fn handle_user_input(
 
     write!(output, "{}{}", termion::clear::All, termion::cursor::Show)?;
     Ok(())
+}
+
+fn swap_rows(
+    context: Context,
+    project_context: Context,
+    command: char,
+    projects: &mut Vec<Project>,
+) -> Result<Context> {
+    let neighbor: i16 = context.idx() as i16 + if command == 'J' { 1 } else { -1 };
+    match context {
+        Context::Project(_, len) => {
+            if neighbor >= 0 && neighbor < len as i16 {
+                projects.swap(context.idx(), neighbor as usize);
+                save_database(projects)?;
+                Ok(Context::Project(neighbor as u16 + HEADER_OFFSET + 1, len))
+            } else {
+                Ok(context)
+            }
+        }
+        Context::Task(_, len) => {
+            if neighbor >= 0 && neighbor < len as i16 {
+                projects[project_context.idx()]
+                    .tasks
+                    .swap(context.idx(), neighbor as usize);
+                save_database(projects)?;
+                Ok(Context::Task(neighbor as u16 + HEADER_OFFSET + 1, len))
+            } else {
+                Ok(context)
+            }
+        }
+    }
 }
 
 fn get_input_line(
