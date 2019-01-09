@@ -301,7 +301,7 @@ fn pane_div(width: u16) -> String {
     format!(
         "{}{}{}",
         DIV_COLOR,
-        (0..width - 2).map(|_| "-").collect::<String>(),
+        (0..width - 3).map(|_| "-").collect::<String>(),
         Fg(color::Reset),
     )
 }
