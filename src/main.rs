@@ -32,6 +32,7 @@ const HEADER_OFFSET: u16 = 2;
 const DIV_COLOR: Fg<Rgb> = Fg(Rgb(0, 150, 230));
 const YELLOW: Rgb = Rgb(241, 196, 15);
 const PINK: Rgb = Rgb(200, 0, 150);
+const BLUE: Rgb = Rgb(52, 152, 219);
 
 fn main() -> Result<()> {
     let json_data = load_database()?;
@@ -142,6 +143,27 @@ fn backspace(
     output.flush()
 }
 
+fn confirm_deletion(
+    line: u16,
+    input: &mut std::io::Stdin,
+    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
+) -> Result<bool> {
+    write!(
+        output,
+        "{}{}{}",
+        termion::cursor::Goto(1, line),
+        FormattedString::from("Are you sure you want to delete this row?").fg(YELLOW),
+        FormattedString::from(" [y/N]").fg(BLUE)
+    )?;
+
+    output.flush()?;
+
+    match input.keys().next().unwrap()? {
+        Key::Char('y') | Key::Char('Y') => Ok(true),
+        _ => Ok(false),
+    }
+}
+
 fn write_input_prompt(
     line: u16,
     output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
@@ -213,7 +235,10 @@ fn handle_user_input(
             Key::Char(change @ '>') | Key::Char(change @ '<') => {
                 context = change_status(context, project_context, projects, change)?;
             }
-            Key::Char('-') => context = delete_current_line(context, project_context, projects)?,
+            Key::Char('-') => match confirm_deletion(terminal_height, input, &mut output)? {
+                true => context = delete_current_line(context, project_context, projects)?,
+                _ => {}
+            },
             Key::Char('+') => {
                 context = add_line(
                     context,
