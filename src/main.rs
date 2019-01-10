@@ -7,9 +7,11 @@ extern crate serde;
 extern crate serde_json;
 
 mod formatted_string;
+mod io;
 mod project;
 
 use crate::formatted_string::FormattedString;
+use crate::io::IO;
 use crate::project::Listable;
 use crate::project::{Event, Project, State, Task};
 
@@ -17,15 +19,13 @@ use chrono::prelude::Utc;
 use std::cmp::max;
 use std::cmp::min;
 use std::fs;
-use std::io::{stdin, stdout, Write};
+use std::io::{stdin, stdout};
 use std::io::{Error, ErrorKind, Result};
 use termion::color;
-use termion::color::Bg;
 use termion::color::Fg;
 use termion::color::Rgb;
 use termion::event::Key;
-use termion::input::TermRead;
-use termion::raw::{IntoRawMode, RawTerminal};
+use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
 
 const HEADER_OFFSET: u16 = 2;
@@ -37,10 +37,13 @@ const BLUE: Rgb = Rgb(52, 152, 219);
 fn main() -> Result<()> {
     let json_data = load_database()?;
     let mut projects: Vec<Project> = serde_json::from_str(json_data.as_str())?;
-    let mut stdin = stdin();
-    let stdout = AlternateScreen::from(stdout().into_raw_mode().unwrap());
 
-    handle_user_input(&mut stdin, stdout, &mut projects)
+    let mut io = IO {
+        input: &mut stdin(),
+        output: &mut AlternateScreen::from(stdout().into_raw_mode().unwrap()),
+    };
+
+    handle_user_input(&mut io, &mut projects)
 }
 
 fn database_file() -> Result<String> {
@@ -81,147 +84,66 @@ impl Context {
     }
 }
 
-fn write_line(
-    index: u16,
-    current_line: u16,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
-    content: &Listable,
-) -> Result<()> {
-    let line_number = if index >= HEADER_OFFSET {
-        (index - HEADER_OFFSET + 1).to_string()
+fn numbered_row<'a>(row: u16, focused_row: u16, content: &Listable) -> String {
+    let row_number = if row > HEADER_OFFSET {
+        (row - HEADER_OFFSET).to_string()
     } else {
         " ".to_string()
     };
 
-    let (cursor, formatted_content) = if index == current_line - 1 {
-        (
-            FormattedString::from(&line_number)
-                .right(3)
-                .fg(YELLOW)
-                .focused(),
-            FormattedString::from(&content.view()).focused(),
-        )
+    let cursor = FormattedString::from(&row_number).right(3);
+    let formatted_content = FormattedString::from(&content.view());
+
+    if row == focused_row {
+        cursor.fg(YELLOW).concat(&formatted_content.focused())
     } else {
-        (
-            FormattedString::from(&line_number).right(3),
-            FormattedString::from(&content.view()),
-        )
-    };
-
-    write!(
-        output,
-        "{}{}{}{}",
-        if index == 0 { "" } else { "\n" },
-        termion::cursor::Goto(1, index + HEADER_OFFSET as u16),
-        cursor,
-        formatted_content,
-    )
+        cursor.concat(&formatted_content)
+    }
 }
 
-fn write_input_char(
-    line: u16,
-    column: u16,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
-    content: char,
-) -> Result<()> {
-    write!(output, "{}{}", termion::cursor::Goto(column, line), content)?;
-    output.flush()
-}
+fn confirm_deletion<'a>(row: u16, io: &mut IO<'a>) -> Result<bool> {
+    let question = FormattedString::from("Are you sure you want to delete this row?").fg(YELLOW);
+    io.write_in_pos(row, 1, question)?;
+    io.write(FormattedString::from(" [y/N]").fg(BLUE))?;
 
-fn backspace(
-    line: u16,
-    column: u16,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
-) -> Result<()> {
-    write!(
-        output,
-        "{}{}{}",
-        termion::cursor::Goto(column, line),
-        ' ',
-        termion::cursor::Goto(column, line)
-    )?;
-    output.flush()
-}
-
-fn confirm_deletion(
-    line: u16,
-    input: &mut std::io::Stdin,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
-) -> Result<bool> {
-    write!(
-        output,
-        "{}{}{}",
-        termion::cursor::Goto(1, line),
-        FormattedString::from("Are you sure you want to delete this row?").fg(YELLOW),
-        FormattedString::from(" [y/N]").fg(BLUE)
-    )?;
-
-    output.flush()?;
-
-    match input.keys().next().unwrap()? {
+    match io.get_char()? {
         Key::Char('y') | Key::Char('Y') => Ok(true),
         _ => Ok(false),
     }
 }
 
-fn write_input_prompt(
-    line: u16,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
-) -> Result<()> {
-    write!(
-        output,
-        "{}{}",
-        termion::cursor::Goto(1, line),
-        FormattedString::from("-> ").fg(PINK)
-    )?;
-    output.flush()
-}
-
-fn clear_screen(output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>) -> Result<()> {
-    write!(
-        output,
-        "{}{}{}",
-        termion::cursor::Goto(1, 1),
-        Bg(color::Reset),
-        termion::clear::All
-    )
-}
-
-fn handle_user_input(
-    input: &mut std::io::Stdin,
-    mut output: AlternateScreen<RawTerminal<std::io::Stdout>>,
-    projects: &mut Vec<Project>,
-) -> Result<()> {
-    write!(output, "{}{}", termion::clear::All, termion::cursor::Hide)?;
+fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result<()> {
+    io.clear_screen()?;
+    io.hide_cursor()?;
     let mut context = Context::Project(HEADER_OFFSET + 1, projects.len() as u16);
     let mut project_context = Context::Project(HEADER_OFFSET + 1, projects.len() as u16);
     let (terminal_width, terminal_height) = termion::terminal_size()?;
 
     loop {
-        clear_screen(&mut output)?;
+        io.clear_screen()?;
 
         match context {
-            Context::Project(current_line, _) => {
-                write_line(0, 3, &mut output, &Project::header())?;
-                write_line(1, 4, &mut output, &pane_div(terminal_width))?;
+            Context::Project(focused_row, _) => {
+                io.write_in_pos(1, 1, numbered_row(0, 3, &Project::header()))?;
+                io.write_in_pos(2, 1, numbered_row(1, 4, &pane_div(terminal_width)))?;
                 for (i, project) in projects.iter().enumerate() {
-                    write_line(i as u16 + HEADER_OFFSET, current_line, &mut output, project)?
+                    let row = i as u16 + HEADER_OFFSET + 1;
+                    io.write_in_pos(row, 1, numbered_row(row, focused_row, project))?
                 }
             }
-            Context::Task(current_line, _) => {
+            Context::Task(focused_row, _) => {
                 projects[project_context.idx()].sort_tasks();
 
-                write_line(0, 3, &mut output, &Task::header())?;
-                write_line(1, 4, &mut output, &pane_div(terminal_width))?;
+                io.write_in_pos(1, 1, numbered_row(0, 3, &Task::header()))?;
+                io.write_in_pos(2, 1, numbered_row(1, 4, &pane_div(terminal_width)))?;
                 for (i, task) in projects[project_context.idx()].tasks.iter().enumerate() {
-                    write_line(i as u16 + HEADER_OFFSET, current_line, &mut output, task)?
+                    let row = i as u16 + HEADER_OFFSET + 1;
+                    io.write_in_pos(row, 1, numbered_row(row, focused_row, task))?
                 }
             }
         }
 
-        output.flush()?;
-
-        match input.keys().next().unwrap()? {
+        match io.get_char()? {
             Key::Char('q') => break,
             Key::Char('j') | Key::Down => context = next_line(context),
             Key::Char('k') | Key::Up => context = previous_line(context),
@@ -235,25 +157,18 @@ fn handle_user_input(
             Key::Char(change @ '>') | Key::Char(change @ '<') => {
                 context = change_status(context, project_context, projects, change)?;
             }
-            Key::Char('-') => match confirm_deletion(terminal_height, input, &mut output)? {
+            Key::Char('-') => match confirm_deletion(terminal_height, io)? {
                 true => context = delete_current_line(context, project_context, projects)?,
                 _ => {}
             },
             Key::Char('+') => {
-                context = add_line(
-                    context,
-                    project_context,
-                    terminal_height,
-                    projects,
-                    input,
-                    &mut output,
-                )?
+                context = add_line(context, project_context, terminal_height, projects, io)?
             }
             _ => {}
         }
     }
-
-    write!(output, "{}{}", termion::clear::All, termion::cursor::Show)?;
+    io.clear_screen()?;
+    io.show_cursor()?;
     Ok(())
 }
 
@@ -288,17 +203,15 @@ fn swap_rows(
     }
 }
 
-fn get_input_line(
-    input: &mut std::io::Stdin,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
-    line: u16,
-) -> Result<Option<String>> {
+fn get_input_line<'a>(io: &mut IO<'a>, row: u16) -> Result<Option<String>> {
     let mut description = String::from("");
     let mut result = Ok(None);
 
-    write!(output, "{}", termion::cursor::Show)?;
+    io.show_cursor()?;
 
-    for c in input.keys() {
+    loop {
+        let c = io.get_char();
+
         match c? {
             Key::Esc => break,
             Key::Char('\n') => {
@@ -307,18 +220,18 @@ fn get_input_line(
             }
             Key::Backspace => {
                 if let Some(_) = description.pop() {
-                    backspace(line, 4 + description.chars().count() as u16, output)?
+                    io.erase(row, 4 + description.chars().count() as u16)?
                 }
             }
             Key::Char(c) => {
                 description.push(c);
-                write_input_char(line, 3 + description.chars().count() as u16, output, c)?
+                io.write_in_pos(row, 3 + description.chars().count() as u16, c)?
             }
             _ => {}
         }
     }
 
-    write!(output, "{}", termion::cursor::Hide)?;
+    io.hide_cursor()?;
     result
 }
 
@@ -375,16 +288,15 @@ fn leave_context(context: &mut Context, project_context: &mut Context) {
     }
 }
 
-fn add_line(
+fn add_line<'a>(
     context: Context,
     project_context: Context,
     terminal_height: u16,
     projects: &mut Vec<Project>,
-    input: &mut std::io::Stdin,
-    output: &mut AlternateScreen<RawTerminal<std::io::Stdout>>,
+    io: &mut IO<'a>,
 ) -> Result<Context> {
-    write_input_prompt(terminal_height, output)?;
-    let description = get_input_line(input, output, terminal_height)?;
+    io.write_in_pos(terminal_height, 1, FormattedString::from("-> ").fg(PINK))?;
+    let description = get_input_line(io, terminal_height)?;
 
     if let Some(description) = description {
         match context {

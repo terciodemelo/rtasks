@@ -99,6 +99,10 @@ impl FormattedString {
             _ => FormattedString::from(self.content()).center(width),
         }
     }
+
+    pub fn concat(&self, other: &FormattedString) -> String {
+        format!("{}{}", self.to_string(), other.to_string())
+    }
 }
 
 impl Display for FormattedString {
