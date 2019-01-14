@@ -13,7 +13,7 @@ mod project;
 use crate::formatted_string::FormattedString;
 use crate::io::IO;
 use crate::project::Listable;
-use crate::project::{Event, Project, State, Task};
+use crate::project::{Event, Project, Task};
 
 use chrono::prelude::Utc;
 use std::cmp::max;
@@ -356,17 +356,8 @@ fn change_status(
         let task_id = task.id.clone();
         let current_state = task.state();
         let next_state = match change {
-            '>' => match current_state {
-                State::TODO => State::ONGOING,
-                State::ONGOING => State::DONE,
-                s @ _ => s,
-            },
-            '<' => match current_state {
-                State::DONE => State::ONGOING,
-                State::ONGOING => State::TODO,
-                s @ _ => s,
-            },
-            _ => State::TODO, // Rust doesn't understand that we already have exhaustive check
+            '>' => current_state.next(),
+            _ => current_state.previous(),
         };
 
         if next_state != current_state {

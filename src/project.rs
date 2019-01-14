@@ -9,13 +9,6 @@ use uuid::Uuid;
 
 use crate::formatted_string::FormattedString;
 
-#[derive(PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize, Copy, Clone, Debug)]
-pub enum State {
-    ONGOING,
-    TODO,
-    DONE,
-}
-
 static RED: Rgb = Rgb(192, 57, 43);
 static YELLOW: Rgb = Rgb(241, 196, 15);
 static GREEN: Rgb = Rgb(46, 204, 113);
@@ -23,8 +16,29 @@ static PINK: Rgb = Rgb(200, 0, 150);
 static BLUE: Rgb = Rgb(52, 152, 219);
 static PURPLE: Rgb = Rgb(214, 162, 232);
 
-fn div() -> FormattedString {
-    FormattedString::from("|").fg(BLUE)
+#[derive(PartialEq, PartialOrd, Eq, Ord, Serialize, Deserialize, Copy, Clone, Debug)]
+pub enum State {
+    ONGOING,
+    TODO,
+    DONE,
+}
+
+impl State {
+    pub fn next(&self) -> State {
+        match self {
+            State::TODO => State::ONGOING,
+            State::ONGOING => State::DONE,
+            State::DONE => State::DONE,
+        }
+    }
+
+    pub fn previous(&self) -> State {
+        match self {
+            State::TODO => State::TODO,
+            State::ONGOING => State::TODO,
+            State::DONE => State::ONGOING,
+        }
+    }
 }
 
 impl Display for State {
@@ -37,6 +51,10 @@ impl Display for State {
 
         write!(f, "{}", name)
     }
+}
+
+fn div() -> FormattedString {
+    FormattedString::from("|").fg(BLUE)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
