@@ -54,7 +54,7 @@ impl Display for State {
 }
 
 fn div() -> FormattedString {
-    FormattedString::from("|").fg(BLUE)
+    FormattedString::from("┃").fg(BLUE)
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]

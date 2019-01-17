@@ -21,15 +21,13 @@ use std::cmp::min;
 use std::fs;
 use std::io::{stdin, stdout};
 use std::io::{Error, ErrorKind, Result};
-use termion::color;
-use termion::color::Fg;
 use termion::color::Rgb;
 use termion::event::Key;
 use termion::raw::IntoRawMode;
 use termion::screen::AlternateScreen;
 
 const HEADER_OFFSET: u16 = 2;
-const DIV_COLOR: Fg<Rgb> = Fg(Rgb(0, 150, 230));
+const DIV_COLOR: Rgb = Rgb(0, 150, 230);
 const YELLOW: Rgb = Rgb(241, 196, 15);
 const PINK: Rgb = Rgb(200, 0, 150);
 const BLUE: Rgb = Rgb(52, 152, 219);
@@ -82,6 +80,18 @@ impl Context {
             Context::Task(index, _) => (index - HEADER_OFFSET - 1) as usize,
         }
     }
+
+    fn pane_div(self, terminal_width: u16) -> String {
+        let columns = match self {
+            Context::Project(_, _) => vec![0, 8, 16, 26, 33],
+            Context::Task(_, _) => vec![0, 10, terminal_width - 24],
+        };
+        let raw_div = (0..terminal_width - 3)
+            .map(|i| if columns.contains(&i) { "╋" } else { "━" })
+            .collect::<String>();
+
+        FormattedString::from(&raw_div).fg(DIV_COLOR).to_string()
+    }
 }
 
 fn numbered_row<'a>(row: u16, focused_row: u16, content: &Listable) -> String {
@@ -125,7 +135,7 @@ fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result
         match context {
             Context::Project(focused_row, _) => {
                 io.write_in_pos(1, 1, numbered_row(0, 3, &Project::header()))?;
-                io.write_in_pos(2, 1, numbered_row(1, 4, &pane_div(terminal_width)))?;
+                io.write_in_pos(2, 1, numbered_row(1, 4, &context.pane_div(terminal_width)))?;
                 for (i, project) in projects.iter().enumerate() {
                     let row = i as u16 + HEADER_OFFSET + 1;
                     io.write_in_pos(row, 1, numbered_row(row, focused_row, project))?
@@ -135,7 +145,7 @@ fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result
                 projects[project_context.idx()].sort_tasks();
 
                 io.write_in_pos(1, 1, numbered_row(0, 3, &Task::header()))?;
-                io.write_in_pos(2, 1, numbered_row(1, 4, &pane_div(terminal_width)))?;
+                io.write_in_pos(2, 1, numbered_row(1, 4, &context.pane_div(terminal_width)))?;
                 for (i, task) in projects[project_context.idx()].tasks.iter().enumerate() {
                     let row = i as u16 + HEADER_OFFSET + 1;
                     io.write_in_pos(row, 1, numbered_row(row, focused_row, task))?
@@ -233,15 +243,6 @@ fn get_input_line<'a>(io: &mut IO<'a>, row: u16) -> Result<Option<String>> {
 
     io.hide_cursor()?;
     result
-}
-
-fn pane_div(width: u16) -> String {
-    format!(
-        "{}{}{}",
-        DIV_COLOR,
-        (0..width - 3).map(|_| "-").collect::<String>(),
-        Fg(color::Reset),
-    )
 }
 
 fn next_line(context: Context) -> Context {
