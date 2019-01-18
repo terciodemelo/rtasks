@@ -172,7 +172,7 @@ fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result
                 _ => {}
             },
             Key::Char('+') => {
-                context = add_line(context, project_context, terminal_height, projects, io)?
+                context = add_row(context, project_context, terminal_height, projects, io)?
             }
             _ => {}
         }
@@ -289,7 +289,7 @@ fn leave_context(context: &mut Context, project_context: &mut Context) {
     }
 }
 
-fn add_line<'a>(
+fn add_row<'a>(
     context: Context,
     project_context: Context,
     terminal_height: u16,
@@ -302,11 +302,13 @@ fn add_line<'a>(
     if let Some(description) = description {
         match context {
             Context::Task(_, size) => {
-                projects[project_context.idx()]
-                    .tasks
-                    .push(Task::new(description));
+                let task = Task::new(description);
+                let task_id = task.id.clone();
+                projects[project_context.idx()].tasks.push(task);
+                projects[project_context.idx()].sort_tasks();
+                let current_row = projects[project_context.idx()].task_position(task_id);
                 save_database(projects)?;
-                Ok(Context::Task(size + HEADER_OFFSET + 1, size + 1))
+                Ok(Context::Task(current_row + HEADER_OFFSET + 1, size + 1))
             }
             Context::Project(_, size) => {
                 projects.push(Project::new(description));

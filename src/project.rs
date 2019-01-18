@@ -111,11 +111,16 @@ impl Project {
         self.tasks.len()
     }
 
+    pub fn task_position(&mut self, task_id: String) -> u16 {
+        self.tasks.iter().position({ |t| t.id == task_id }).unwrap() as u16
+    }
+
     pub fn task_state_count(&self, state: State) -> usize {
         self.tasks
             .iter()
             .fold(0, |acc, t| acc + if t.state() == state { 1 } else { 0 })
     }
+
     pub fn header() -> String {
         format!(
             "{div_left}{tasks}{div}{todo}{div}{ongoing}{div}{done}{div}{desc}",
