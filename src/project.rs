@@ -103,16 +103,12 @@ impl Project {
         self.tasks.sort_by(|a, b| a.state().cmp(&b.state()));
     }
 
-    pub fn find_task_index(&self, id: String) -> Option<usize> {
-        self.tasks.iter().position(|t| t.id == id)
-    }
-
     pub fn task_count(&self) -> usize {
         self.tasks.len()
     }
 
-    pub fn task_position(&mut self, task_id: String) -> u16 {
-        self.tasks.iter().position({ |t| t.id == task_id }).unwrap() as u16
+    pub fn task_position(&self, task_id: String) -> Option<usize> {
+        self.tasks.iter().position(|t| t.id == task_id)
     }
 
     pub fn task_state_count(&self, state: State) -> usize {

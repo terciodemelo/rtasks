@@ -6,21 +6,18 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 
+mod database;
 mod formatted_string;
 mod io;
 mod project;
 
-use crate::formatted_string::FormattedString;
-use crate::io::IO;
-use crate::project::Listable;
-use crate::project::{Event, Project, Task};
+use crate::database::*;
+use crate::formatted_string::*;
+use crate::io::*;
+use crate::project::*;
 
-use chrono::prelude::Utc;
-use std::cmp::max;
-use std::cmp::min;
-use std::fs;
+use std::io::Result;
 use std::io::{stdin, stdout};
-use std::io::{Error, ErrorKind, Result};
 use termion::color::Rgb;
 use termion::event::Key;
 use termion::raw::IntoRawMode;
@@ -33,38 +30,14 @@ const PINK: Rgb = Rgb(200, 0, 150);
 const BLUE: Rgb = Rgb(52, 152, 219);
 
 fn main() -> Result<()> {
-    let json_data = load_database()?;
-    let mut projects: Vec<Project> = serde_json::from_str(json_data.as_str())?;
+    let mut database = Database::load()?;
 
     let mut io = IO {
         input: &mut stdin(),
         output: &mut AlternateScreen::from(stdout().into_raw_mode().unwrap()),
     };
 
-    handle_user_input(&mut io, &mut projects)
-}
-
-fn database_file() -> Result<String> {
-    match dirs::home_dir() {
-        Some(path) => Ok(format!(
-            "{}{}",
-            path.to_str().unwrap(),
-            "/.tasks/projects.json"
-        )),
-        None => Err(Error::new(
-            ErrorKind::Other,
-            "Couldn't resolve your home directory",
-        )),
-    }
-}
-
-fn load_database() -> Result<String> {
-    fs::read_to_string(database_file()?)
-}
-
-fn save_database(projects: &Vec<Project>) -> Result<()> {
-    let content = serde_json::to_string(projects)?;
-    fs::write(database_file()?, content)
+    handle_user_input(&mut io, &mut database)
 }
 
 #[derive(Copy, Clone)]
@@ -76,8 +49,58 @@ enum Context {
 impl Context {
     fn idx(self) -> usize {
         match self {
-            Context::Project(index, _) => (index - HEADER_OFFSET - 1) as usize,
-            Context::Task(index, _) => (index - HEADER_OFFSET - 1) as usize,
+            Context::Project(row, _) => (row - HEADER_OFFSET - 1) as usize,
+            Context::Task(row, _) => (row - HEADER_OFFSET - 1) as usize,
+        }
+    }
+
+    fn drop(self) -> Option<Context> {
+        match self {
+            Context::Project(row, len) => {
+                if len > 0 {
+                    Some(Context::Project(row - 1, len - 1))
+                } else {
+                    None
+                }
+            }
+            Context::Task(row, len) => {
+                if len > 0 {
+                    Some(Context::Task(row - 1, len - 1))
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    fn length(self) -> usize {
+        match self {
+            Context::Project(_, length) => length as usize,
+            Context::Task(_, length) => length as usize,
+        }
+    }
+
+    fn jump_to(self, index: usize) -> Option<Context> {
+        self.jump(index as i16 - self.idx() as i16)
+    }
+
+    fn jump(self, distance: i16) -> Option<Context> {
+        let index = self.idx() as i16;
+        match self {
+            Context::Project(row, len) => {
+                if index + distance >= 0 && index + distance < len as i16 {
+                    Some(Context::Project((row as i16 + distance) as u16, len))
+                } else {
+                    None
+                }
+            }
+            Context::Task(row, len) => {
+                if index + distance >= 0 && index + distance < len as i16 {
+                    Some(Context::Task((row as i16 + distance) as u16, len))
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -122,11 +145,11 @@ fn confirm_deletion<'a>(row: u16, io: &mut IO<'a>) -> Result<bool> {
     }
 }
 
-fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result<()> {
+fn handle_user_input<'a>(io: &mut IO<'a>, db: &mut Database) -> Result<()> {
     io.clear_screen()?;
     io.hide_cursor()?;
-    let mut context = Context::Project(HEADER_OFFSET + 1, projects.len() as u16);
-    let mut project_context = Context::Project(HEADER_OFFSET + 1, projects.len() as u16);
+    let mut context = Context::Project(HEADER_OFFSET + 1, db.project_count());
+    let mut project_context = Context::Project(HEADER_OFFSET + 1, db.project_count());
     let (terminal_width, terminal_height) = termion::terminal_size()?;
 
     loop {
@@ -136,17 +159,15 @@ fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result
             Context::Project(focused_row, _) => {
                 io.write_in_pos(1, 1, numbered_row(0, 3, &Project::header()))?;
                 io.write_in_pos(2, 1, numbered_row(1, 4, &context.pane_div(terminal_width)))?;
-                for (i, project) in projects.iter().enumerate() {
+                for (i, project) in db.projects().enumerate() {
                     let row = i as u16 + HEADER_OFFSET + 1;
                     io.write_in_pos(row, 1, numbered_row(row, focused_row, project))?
                 }
             }
             Context::Task(focused_row, _) => {
-                projects[project_context.idx()].sort_tasks();
-
                 io.write_in_pos(1, 1, numbered_row(0, 3, &Task::header()))?;
                 io.write_in_pos(2, 1, numbered_row(1, 4, &context.pane_div(terminal_width)))?;
-                for (i, task) in projects[project_context.idx()].tasks.iter().enumerate() {
+                for (i, task) in db.tasks(project_context.idx()).enumerate() {
                     let row = i as u16 + HEADER_OFFSET + 1;
                     io.write_in_pos(row, 1, numbered_row(row, focused_row, task))?
                 }
@@ -155,25 +176,23 @@ fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result
 
         match io.get_char()? {
             Key::Char('q') => break,
-            Key::Char('j') | Key::Down => context = next_line(context),
-            Key::Char('k') | Key::Up => context = previous_line(context),
-            Key::Char('g') => context = first_line(context),
-            Key::Char('G') => context = last_line(context),
+            Key::Char('j') | Key::Down => context = context.jump(1).unwrap_or(context),
+            Key::Char('k') | Key::Up => context = context.jump(-1).unwrap_or(context),
+            Key::Char('g') => context = context.jump_to(0).unwrap_or(context),
+            Key::Char('G') => context = context.jump_to(context.length() - 1).unwrap_or(context),
             Key::Char(c @ 'J') | Key::Char(c @ 'K') => {
-                context = swap_rows(context, project_context, c, projects)?;
+                context = swap_rows(context, project_context.idx(), c, db)?;
             }
-            Key::Char('\n') => enter_context(&mut context, &mut project_context, &projects),
+            Key::Char('\n') => enter_context(&mut context, &mut project_context, db),
             Key::Esc => leave_context(&mut context, &mut project_context),
             Key::Char(change @ '>') | Key::Char(change @ '<') => {
-                context = change_status(context, project_context, projects, change)?;
+                context = change_status(context, project_context.idx(), db, change)?;
             }
             Key::Char('-') => match confirm_deletion(terminal_height, io)? {
-                true => context = delete_current_line(context, project_context, projects)?,
+                true => context = delete_row(context, project_context, db)?,
                 _ => {}
             },
-            Key::Char('+') => {
-                context = add_row(context, project_context, terminal_height, projects, io)?
-            }
+            Key::Char('+') => context = add_row(context, project_context, terminal_height, db, io)?,
             _ => {}
         }
     }
@@ -182,34 +201,15 @@ fn handle_user_input<'a>(io: &mut IO<'a>, projects: &mut Vec<Project>) -> Result
     Ok(())
 }
 
-fn swap_rows(
-    context: Context,
-    project_context: Context,
-    command: char,
-    projects: &mut Vec<Project>,
-) -> Result<Context> {
-    let neighbor: i16 = context.idx() as i16 + if command == 'J' { 1 } else { -1 };
-    match context {
-        Context::Project(_, len) => {
-            if neighbor >= 0 && neighbor < len as i16 {
-                projects.swap(context.idx(), neighbor as usize);
-                save_database(projects)?;
-                Ok(Context::Project(neighbor as u16 + HEADER_OFFSET + 1, len))
-            } else {
-                Ok(context)
-            }
+fn swap_rows(context: Context, project: usize, cmd: char, db: &mut Database) -> Result<Context> {
+    if let Some(next_context) = context.jump(if cmd == 'J' { 1 } else { -1 }) {
+        match context {
+            Context::Project(_, _) => db.swap_projects(context.idx(), next_context.idx())?,
+            Context::Task(_, _) => db.swap_tasks(project, context.idx(), next_context.idx())?,
         }
-        Context::Task(_, len) => {
-            if neighbor >= 0 && neighbor < len as i16 {
-                projects[project_context.idx()]
-                    .tasks
-                    .swap(context.idx(), neighbor as usize);
-                save_database(projects)?;
-                Ok(Context::Task(neighbor as u16 + HEADER_OFFSET + 1, len))
-            } else {
-                Ok(context)
-            }
-        }
+        Ok(next_context)
+    } else {
+        Ok(context)
     }
 }
 
@@ -245,41 +245,10 @@ fn get_input_line<'a>(io: &mut IO<'a>, row: u16) -> Result<Option<String>> {
     result
 }
 
-fn next_line(context: Context) -> Context {
-    match context {
-        Context::Project(line, len) => Context::Project(min(len + HEADER_OFFSET, line + 1), len),
-        Context::Task(line, len) => Context::Task(min(len + HEADER_OFFSET, line + 1), len),
-    }
-}
-
-fn previous_line(context: Context) -> Context {
-    match context {
-        Context::Project(line, len) => Context::Project(max(HEADER_OFFSET + 1, line - 1), len),
-        Context::Task(line, len) => Context::Task(max(HEADER_OFFSET + 1, line - 1), len),
-    }
-}
-
-fn first_line(context: Context) -> Context {
-    match context {
-        Context::Project(_, len) => Context::Project(HEADER_OFFSET + 1, len),
-        Context::Task(_, len) => Context::Task(HEADER_OFFSET + 1, len),
-    }
-}
-
-fn last_line(context: Context) -> Context {
-    match context {
-        Context::Project(_, len) => Context::Project(HEADER_OFFSET + len, len),
-        Context::Task(_, len) => Context::Task(HEADER_OFFSET + len, len),
-    }
-}
-
-fn enter_context(context: &mut Context, project_context: &mut Context, projects: &Vec<Project>) {
+fn enter_context(context: &mut Context, project_context: &mut Context, db: &Database) {
     if let Context::Project(_, _) = context {
         *project_context = *context;
-        *context = Context::Task(
-            HEADER_OFFSET + 1,
-            projects[context.idx()].tasks.len() as u16,
-        );
+        *context = Context::Task(HEADER_OFFSET + 1, db.task_count(project_context.idx()));
     }
 }
 
@@ -293,7 +262,7 @@ fn add_row<'a>(
     context: Context,
     project_context: Context,
     terminal_height: u16,
-    projects: &mut Vec<Project>,
+    db: &mut Database,
     io: &mut IO<'a>,
 ) -> Result<Context> {
     io.write_in_pos(terminal_height, 1, FormattedString::from("-> ").fg(PINK))?;
@@ -303,16 +272,11 @@ fn add_row<'a>(
         match context {
             Context::Task(_, size) => {
                 let task = Task::new(description);
-                let task_id = task.id.clone();
-                projects[project_context.idx()].tasks.push(task);
-                projects[project_context.idx()].sort_tasks();
-                let current_row = projects[project_context.idx()].task_position(task_id);
-                save_database(projects)?;
-                Ok(Context::Task(current_row + HEADER_OFFSET + 1, size + 1))
+                let task_index = db.add_task(project_context.idx(), task)?.unwrap() as u16;
+                Ok(Context::Task(task_index + HEADER_OFFSET + 1, size + 1))
             }
             Context::Project(_, size) => {
-                projects.push(Project::new(description));
-                save_database(projects)?;
+                db.add_project(Project::new(description))?;
                 Ok(Context::Project(size + HEADER_OFFSET + 1, size + 1))
             }
         }
@@ -321,63 +285,31 @@ fn add_row<'a>(
     }
 }
 
-fn delete_current_line(
-    context: Context,
-    project_context: Context,
-    projects: &mut Vec<Project>,
-) -> Result<Context> {
-    match context {
-        Context::Project(line, length) => {
-            if length > 0 {
-                projects.remove(context.idx());
-                save_database(projects)?;
-                Ok(Context::Project(line - 1, length - 1))
-            } else {
-                Ok(context)
-            }
+fn delete_row(context: Context, project_context: Context, db: &mut Database) -> Result<Context> {
+    match context.drop() {
+        Some(new_context @ Context::Project(_, _)) => {
+            db.remove_project(context.idx())?;
+            Ok(new_context)
         }
-        Context::Task(line, length) => {
-            if length > 0 {
-                projects[project_context.idx()].tasks.remove(context.idx());
-                save_database(projects)?;
-                Ok(Context::Task(line - 1, length - 1))
-            } else {
-                Ok(context)
-            }
+        Some(new_context @ Context::Task(_, _)) => {
+            db.remove_task(project_context.idx(), context.idx())?;
+            Ok(new_context)
         }
+        None => Ok(context),
     }
 }
 
-fn change_status(
-    context: Context,
-    project_context: Context,
-    projects: &mut Vec<Project>,
-    change: char,
-) -> Result<Context> {
+fn change_status(context: Context, project: usize, db: &mut Database, c: char) -> Result<Context> {
     if let Context::Task(_, len) = context {
-        let task = &mut projects[project_context.idx()].tasks[context.idx()];
-        let task_id = task.id.clone();
-        let current_state = task.state();
-        let next_state = match change {
+        let current_state = db.task_state(project, context.idx());
+        let next_state = match c {
             '>' => current_state.next(),
             _ => current_state.previous(),
         };
 
-        if next_state != current_state {
-            task.events.push(Event::State {
-                data: next_state,
-                date_time: Utc::now(),
-            });
-            projects[project_context.idx()].sort_tasks();
-            save_database(projects)?;
-
-            if let Some(index) = projects[project_context.idx()].find_task_index(task_id) {
-                Ok(Context::Task(index as u16 + HEADER_OFFSET + 1, len))
-            } else {
-                Ok(context)
-            }
-        } else {
-            Ok(context)
+        match db.set_task_state(project, context.idx(), next_state)? {
+            Some(new_index) => Ok(Context::Task(new_index as u16 + HEADER_OFFSET + 1, len)),
+            None => Ok(context),
         }
     } else {
         Ok(context)
